@@ -1,5 +1,6 @@
 import express from "express";
 import type { Request, Response } from "express";
+import { fileURLToPath } from "node:url";
 
 // ============================================================
 //  Booking service — tiny appointment scheduler
@@ -31,14 +32,14 @@ const slots: Slot[] = generateSlots();
 const bookings: Booking[] = [];
 // Slots claimed by an in-flight request that hasn't committed yet. Lets a
 // concurrent request see a slot as taken before the booking is pushed.
-const reserved = new Set<string>();
+const reservedSlotIds = new Set<string>();
 // Monotonic id counter — never reuse an id even if a booking is rolled back.
-let bookingSeq = 0;
+let bookingCounter = 0;
 
 // A slot is taken if it has a committed booking OR an in-flight reservation.
 // Single source of truth for availability, used by both routes below.
 function isSlotTaken(slotId: string): boolean {
-  return reserved.has(slotId) || bookings.some((b) => b.slotId === slotId);
+  return reservedSlotIds.has(slotId) || bookings.some((b) => b.slotId === slotId);
 }
 
 function generateSlots(): Slot[] {
@@ -89,12 +90,12 @@ app.post("/api/bookings", (req: Request, res: Response) => {
   if (isSlotTaken(slotId)) {
     return res.status(409).json({ error: "slot already booked" });
   }
-  reserved.add(slotId);
+  reservedSlotIds.add(slotId);
 
   // Simulate the latency of writing to a database
   setTimeout(() => {
     const booking: Booking = {
-      id: "b" + ++bookingSeq,
+      id: "b" + ++bookingCounter,
       slotId,
       customerName: customerName ?? "",
       customerEmail,
@@ -102,7 +103,7 @@ app.post("/api/bookings", (req: Request, res: Response) => {
       createdAt: new Date().toISOString(),
     };
     bookings.push(booking);
-    reserved.delete(slotId);
+    reservedSlotIds.delete(slotId);
     res.status(201).json(booking);
   }, 200);
 });
@@ -112,5 +113,13 @@ app.get("/api/bookings/:id", (req: Request, res: Response) => {
   return b ? res.json(b) : res.status(404).end();
 });
 
-const PORT = 3000;
-app.listen(PORT, () => console.log(`booking server listening on :${PORT}`));
+// Export the app so tests can mount it on an ephemeral port in-process.
+export { app };
+
+// Only start a real listener when this file is run directly (not when imported
+// by a test). Works under both `tsx` and `tsx watch`.
+const isEntrypoint = process.argv[1] === fileURLToPath(import.meta.url);
+if (isEntrypoint) {
+  const PORT = 3000;
+  app.listen(PORT, () => console.log(`booking server listening on :${PORT}`));
+}
