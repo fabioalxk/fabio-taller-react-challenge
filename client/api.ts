@@ -24,8 +24,18 @@ export async function createBooking(input: {
   return r.json();
 }
 
+// Display appointment times in the user's own timezone, detected automatically.
+// Omitting `timeZone` makes Intl use the runtime's local zone; the label tells
+// the user which zone the time is shown in.
+const slotFormatter = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZoneName: "short",
+});
+
 export function formatSlot(startsAtIso: string): string {
-  // Parse the full UTC instant (keep the "Z") and let the browser convert to local time
-  const d = new Date(startsAtIso);
-  return d.toLocaleString();
+  return slotFormatter.format(new Date(startsAtIso));
 }
