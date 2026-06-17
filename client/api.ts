@@ -24,8 +24,16 @@ export async function createBooking(input: {
   return r.json();
 }
 
+// Omitting `timeZone` formats in the runtime's local zone; the label shows which.
+const slotFormatter = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZoneName: "short",
+});
+
 export function formatSlot(startsAtIso: string): string {
-  // Display in the user's local time
-  const d = new Date(startsAtIso.slice(0, 19));
-  return d.toLocaleString();
+  return slotFormatter.format(new Date(startsAtIso));
 }
