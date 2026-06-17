@@ -1,18 +1,9 @@
-// Unit tests for the client API helpers.
-//
-//   npm test
-//
-// Coverage maps to the PR's fixes:
-//   - timezones are being shown correctly (formatSlot uses the full ISO
-//     instant + the runtime's local zone, with a zone label)
-//   - the fetch wrappers (fetchSlots / createBooking) shape requests and
-//     surface errors correctly
+// Tests for the client API helpers.
 import assert from "node:assert/strict";
 import { test, afterEach } from "node:test";
 import { fetchSlots, createBooking, formatSlot } from "./api.ts";
 
-// Mirror the formatter options used inside formatSlot, so tests stay decoupled
-// from the machine's timezone.
+// Mirror formatSlot's options so the test stays decoupled from the machine's zone.
 const reference = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
   month: "short",
@@ -27,27 +18,20 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-// --- formatSlot ------------------------------------------------------------
-
 test("formatSlot formats the exact instant in the local zone with a label", () => {
   const iso = "2026-06-17T05:00:00.000Z";
-  // Must equal a fresh formatter fed the same instant — proves formatSlot
-  // parses the full ISO string (not a truncated, zone-stripped version).
+  // Proves formatSlot parses the full ISO instant, not a truncated version.
   assert.equal(formatSlot(iso), reference.format(new Date(iso)));
-  // The "short" timeZoneName means a zone label is always present.
   assert.match(formatSlot(iso), /\s\S/);
 });
 
 test("formatSlot treats the same instant in different offsets identically", () => {
-  // These two ISO strings describe the SAME moment in time. The old buggy
-  // implementation sliced off the offset and read them as different local
-  // times; the fix must format them identically.
+  // Same moment in time: the old bug sliced off the offset and read these as
+  // different local times; the fix must format them identically.
   const utc = "2026-06-17T05:00:00.000Z";
   const offset = "2026-06-17T00:00:00.000-05:00";
   assert.equal(formatSlot(utc), formatSlot(offset));
 });
-
-// --- fetchSlots ------------------------------------------------------------
 
 test("fetchSlots returns the slots array from the response", async () => {
   const slots = [{ id: "s1", startsAt: "2026-06-17T05:00:00.000Z", durationMinutes: 60, taken: false }];
@@ -61,8 +45,6 @@ test("fetchSlots returns the slots array from the response", async () => {
   assert.equal(calledUrl, "/api/slots");
   assert.deepEqual(result, slots);
 });
-
-// --- createBooking ---------------------------------------------------------
 
 const input = {
   slotId: "s1",

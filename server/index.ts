@@ -30,14 +30,11 @@ type Booking = {
 
 const slots: Slot[] = generateSlots();
 const bookings: Booking[] = [];
-// Slots claimed by an in-flight request that hasn't committed yet. Lets a
-// concurrent request see a slot as taken before the booking is pushed.
+// Slots claimed by an in-flight request that hasn't committed yet, so a
+// concurrent request sees them as taken before the booking is pushed.
 const reservedSlotIds = new Set<string>();
-// Monotonic id counter — never reuse an id even if a booking is rolled back.
 let bookingCounter = 0;
 
-// A slot is taken if it has a committed booking OR an in-flight reservation.
-// Single source of truth for availability, used by both routes below.
 function isSlotTaken(slotId: string): boolean {
   return reservedSlotIds.has(slotId) || bookings.some((b) => b.slotId === slotId);
 }
@@ -64,7 +61,6 @@ const app = express();
 app.use(express.json());
 
 app.get("/api/slots", (_req: Request, res: Response) => {
-  // Filter out slots whose start time is already in the past (UTC vs UTC)
   const now = new Date().toISOString();
   const available = slots
     .filter((s) => s.startsAt > now)
@@ -84,9 +80,8 @@ app.post("/api/bookings", (req: Request, res: Response) => {
   const slot = slots.find((s) => s.id === slotId);
   if (!slot) return res.status(404).json({ error: "slot not found" });
 
-  // Claim the slot in the SAME synchronous tick as the check, so a concurrent
-  // request cannot pass this guard before we commit. (A real DB uses a unique
-  // constraint on slotId to enforce this atomically.)
+  // Claim the slot in the same synchronous tick as the check, so a concurrent
+  // request cannot pass this guard before we commit.
   if (isSlotTaken(slotId)) {
     return res.status(409).json({ error: "slot already booked" });
   }
@@ -113,11 +108,9 @@ app.get("/api/bookings/:id", (req: Request, res: Response) => {
   return b ? res.json(b) : res.status(404).end();
 });
 
-// Export the app so tests can mount it on an ephemeral port in-process.
 export { app };
 
-// Only start a real listener when this file is run directly (not when imported
-// by a test). Works under both `tsx` and `tsx watch`.
+// Only start a listener when run directly, not when imported by a test.
 const isEntrypoint = process.argv[1] === fileURLToPath(import.meta.url);
 if (isEntrypoint) {
   const PORT = 3000;

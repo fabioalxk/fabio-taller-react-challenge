@@ -1,15 +1,4 @@
-// Unit tests for the booking server.
-//
-// These are self-contained: they mount the exported `app` on an ephemeral
-// port in-process, so no separately running server is required.
-//
-//   npm test
-//
-// Coverage maps to the PR's fixes:
-//   - prevent double-booking race condition (reserved set + isSlotTaken)
-//   - only show booking times that are ahead (past-slot filtering)
-//   - monotonic, never-reused booking ids
-//   - input validation / not-found behaviour
+// Booking server tests: mount the exported `app` on an ephemeral port in-process.
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
 import type { AddressInfo } from "node:net";
@@ -32,8 +21,6 @@ before(async () => {
 after(() => {
   server.close();
 });
-
-// --- helpers ---------------------------------------------------------------
 
 type ApiSlot = { id: string; startsAt: string; durationMinutes: number; taken: boolean };
 
@@ -58,8 +45,8 @@ function book(slotId: string, extra: Record<string, unknown> = {}) {
   });
 }
 
-// Compute the set of slot ids the server *should* expose right now: the 24
-// hourly slots from today 00:00 UTC, keeping only those still in the future.
+// The slot ids the server should expose now: the future subset of 24 hourly
+// slots from today 00:00 UTC.
 function expectedFutureIds(): string[] {
   const start = new Date();
   start.setUTCHours(0, 0, 0, 0);
@@ -71,8 +58,6 @@ function expectedFutureIds(): string[] {
   }
   return ids;
 }
-
-// --- GET /api/slots --------------------------------------------------------
 
 test("GET /api/slots returns a list with availability flags", async () => {
   const slots = await getSlots();
@@ -89,26 +74,20 @@ test("GET /api/slots only returns slots that start in the future", async () => {
   const slots = await getSlots();
   const now = new Date().toISOString();
 
-  // Core invariant of the "only show times ahead" fix.
   for (const s of slots) {
     assert.ok(s.startsAt > now, `slot ${s.id} (${s.startsAt}) is not in the future`);
   }
 
-  // The old bug compared against a date prefix and so returned *every* slot of
-  // today, including past hours. s1 starts at 00:00 UTC, which is always past
-  // by the time these tests run, so it must be filtered out now.
+  // s1 starts at 00:00 UTC, always past by the time tests run, so it (and at
+  // least one other) must be filtered out — the old bug returned all 24.
   assert.ok(!slots.some((s) => s.id === "s1"), "expected the 00:00 slot to be filtered out");
-  // ...and the filter must actually drop something (never returns all 24).
   assert.ok(slots.length < 24, "expected past slots to be filtered out");
 
-  // The returned ids must match the independently-computed future set.
   assert.deepEqual(
     slots.map((s) => s.id).sort(),
     expectedFutureIds().sort(),
   );
 });
-
-// --- POST /api/bookings: validation & lookup -------------------------------
 
 test("POST /api/bookings without slotId returns 400", async () => {
   const r = await book("", { slotId: undefined });
@@ -125,8 +104,6 @@ test("POST /api/bookings for an unknown slot returns 404", async () => {
   assert.equal(r.status, 404);
 });
 
-// --- POST /api/bookings: happy path ----------------------------------------
-
 test("POST /api/bookings on a free slot returns 201 and the booking", async () => {
   const r = await book("s6");
   assert.equal(r.status, 201);
@@ -135,7 +112,6 @@ test("POST /api/bookings on a free slot returns 201 and the booking", async () =
   assert.equal(booking.slotId, "s6");
   assert.equal(booking.customerEmail, "test@example.com");
 
-  // The booking is retrievable by id.
   const got = await fetch(`${base}/api/bookings/${booking.id}`);
   assert.equal(got.status, 200);
   const fetched = (await got.json()) as { id: string };
@@ -163,8 +139,6 @@ test("GET /api/bookings/:id for an unknown id returns 404", async () => {
   assert.equal(r.status, 404);
 });
 
-// --- double-booking race condition (the headline fix) ----------------------
-
 test("concurrent bookings on one slot: exactly one wins (201), the rest 409", async () => {
   const N = 8;
   const results = await Promise.all(
@@ -181,14 +155,11 @@ test("concurrent bookings on one slot: exactly one wins (201), the rest 409", as
 });
 
 test("an in-flight reservation marks the slot taken before the booking commits", async () => {
-  // Pick a free, future slot so it appears in /api/slots.
   const free = (await getSlots()).find((s) => !s.taken);
   assert.ok(free, "expected at least one free future slot");
 
-  // Fire the booking but do NOT await it: the commit is delayed ~200ms, so
-  // while it is in flight the slot must already read as taken. Give the request
-  // a moment to reach the server and claim the reservation (well under the
-  // 200ms commit window) before we check availability.
+  // Don't await: the commit is delayed ~200ms, so the slot must already read as
+  // taken mid-flight. Wait long enough to claim the reservation, well under 200ms.
   const pending = book(free!.id);
   await new Promise((r) => setTimeout(r, 60));
 
@@ -199,8 +170,6 @@ test("an in-flight reservation marks the slot taken before the booking commits",
   const r = await pending;
   assert.equal(r.status, 201);
 });
-
-// --- monotonic, never-reused ids -------------------------------------------
 
 test("booking ids are unique and monotonically increasing", async () => {
   const r1 = await book("s9");
