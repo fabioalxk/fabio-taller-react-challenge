@@ -29,6 +29,17 @@ type Booking = {
 
 const slots: Slot[] = generateSlots();
 const bookings: Booking[] = [];
+// Slots claimed by an in-flight request that hasn't committed yet. Lets a
+// concurrent request see a slot as taken before the booking is pushed.
+const reserved = new Set<string>();
+// Monotonic id counter — never reuse an id even if a booking is rolled back.
+let bookingSeq = 0;
+
+// A slot is taken if it has a committed booking OR an in-flight reservation.
+// Single source of truth for availability, used by both routes below.
+function isSlotTaken(slotId: string): boolean {
+  return reserved.has(slotId) || bookings.some((b) => b.slotId === slotId);
+}
 
 function generateSlots(): Slot[] {
   // 24 slots, one per hour starting today 00:00 UTC
@@ -52,12 +63,11 @@ const app = express();
 app.use(express.json());
 
 app.get("/api/slots", (_req: Request, res: Response) => {
-  const taken = new Set(bookings.map((b) => b.slotId));
   // Filter out slots whose start time is already in the past (UTC vs UTC)
   const now = new Date().toISOString();
   const available = slots
     .filter((s) => s.startsAt > now)
-    .map((s) => ({ ...s, taken: taken.has(s.id) }));
+    .map((s) => ({ ...s, taken: isSlotTaken(s.id) }));
   res.json({ slots: available });
 });
 
@@ -73,16 +83,18 @@ app.post("/api/bookings", (req: Request, res: Response) => {
   const slot = slots.find((s) => s.id === slotId);
   if (!slot) return res.status(404).json({ error: "slot not found" });
 
-  // Is it already taken?
-  const alreadyBooked = bookings.some((b) => b.slotId === slotId);
-  if (alreadyBooked) {
+  // Claim the slot in the SAME synchronous tick as the check, so a concurrent
+  // request cannot pass this guard before we commit. (A real DB uses a unique
+  // constraint on slotId to enforce this atomically.)
+  if (isSlotTaken(slotId)) {
     return res.status(409).json({ error: "slot already booked" });
   }
+  reserved.add(slotId);
 
   // Simulate the latency of writing to a database
   setTimeout(() => {
     const booking: Booking = {
-      id: "b" + (bookings.length + 1),
+      id: "b" + ++bookingSeq,
       slotId,
       customerName: customerName ?? "",
       customerEmail,
@@ -90,6 +102,7 @@ app.post("/api/bookings", (req: Request, res: Response) => {
       createdAt: new Date().toISOString(),
     };
     bookings.push(booking);
+    reserved.delete(slotId);
     res.status(201).json(booking);
   }, 200);
 });
