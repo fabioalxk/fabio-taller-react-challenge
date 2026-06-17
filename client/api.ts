@@ -25,7 +25,7 @@ export async function createBooking(input: {
 }
 
 export function formatSlot(startsAtIso: string): string {
-  // Display in the user's local time
-  const d = new Date(startsAtIso.slice(0, 19));
+  // Parse the full UTC instant (keep the "Z") and let the browser convert to local time
+  const d = new Date(startsAtIso);
   return d.toLocaleString();
 }

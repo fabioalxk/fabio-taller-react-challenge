@@ -53,10 +53,10 @@ app.use(express.json());
 
 app.get("/api/slots", (_req: Request, res: Response) => {
   const taken = new Set(bookings.map((b) => b.slotId));
-  // Filter out slots from earlier today using the date prefix
-  const today = new Date().toISOString().slice(0, 10);
+  // Filter out slots whose start time is already in the past (UTC vs UTC)
+  const now = new Date().toISOString();
   const available = slots
-    .filter((s) => s.startsAt > today)
+    .filter((s) => s.startsAt > now)
     .map((s) => ({ ...s, taken: taken.has(s.id) }));
   res.json({ slots: available });
 });
